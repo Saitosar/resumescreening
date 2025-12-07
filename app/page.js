@@ -6,97 +6,148 @@ import axios from 'axios';
 export default function Home() {
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
+  // Состояние result теперь может быть массивом, строкой или null
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
 
-  // 1. Просто сохраняем файл в стейт при выборе
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files.length > 0) {
       setFile(e.target.files[0]);
-      setError(''); // Сбрасываем ошибки
-      setResult(null); // Сбрасываем старый результат
+      setError('');
+      setResult(null);
     }
   };
 
-  // 2. Отправка файла на наш API (который перешлет его в N8N)
   const handleAnalyze = async () => {
     if (!file) return;
 
     setLoading(true);
     setError('');
     
-    // Создаем FormData для отправки бинарного файла
     const formData = new FormData();
     formData.append('file', file);
 
     try {
-      // Отправляем на наш новый endpoint
       const response = await axios.post('/api/analyze', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
       });
 
-      // Сохраняем результат от N8N
+      // Ответ может быть массивом, поэтому сохраняем его как есть
       setResult(response.data);
     } catch (err) {
-      console.error('Error:', err);
-      setError('Произошла ошибка при анализе резюме. Попробуйте еще раз.');
+      console.error('Error:', err.response || err);
+      const details = err.response?.data?.details || err.message;
+      setError(`Ошибка анализа: ${details}`);
     } finally {
       setLoading(false);
     }
   };
+  
+  // Извлекаем структурированные данные для отображения
+  const data = Array.isArray(result) && result.length > 0 ? result[0] : null;
 
   return (
-    <main className="flex min-h-screen flex-col items-center p-12 bg-gray-50 text-gray-900">
-      <div className="z-10 w-full max-w-3xl items-center justify-between font-mono text-sm lg:flex mb-10">
-        <h1 className="text-4xl font-bold text-blue-600">CV Scoring App</h1>
+    <main className="main-container">
+      <div className="header-wrapper">
+        <h1 className="main-title">
+          AI Resume Scorer
+        </h1>
       </div>
 
-      <div className="w-full max-w-xl bg-white p-8 rounded-xl shadow-lg">
-        <div className="mb-6">
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            Загрузите резюме (PDF)
+      <div className="card upload-card">
+        <h2 className="card-title">1. Загрузите резюме (PDF)</h2>
+        
+        <div className="input-area">
+          <label className="input-label">
+            <span className="input-text">Нажмите, чтобы выбрать файл или перетащите его сюда</span>
           </label>
           <input
             type="file"
             accept=".pdf"
             onChange={handleFileChange}
-            className="block w-full text-sm text-gray-500
-              file:mr-4 file:py-2 file:px-4
-              file:rounded-full file:border-0
-              file:text-sm file:font-semibold
-              file:bg-blue-50 file:text-blue-700
-              hover:file:bg-blue-100"
+            className="file-input"
           />
         </div>
 
-        {/* Кнопка теперь активируется, если есть file и нет загрузки */}
+        {file && (
+            <p className="file-ready-message">
+                ✅ Файл готов: **{file.name}**
+            </p>
+        )}
+
         <button
           onClick={handleAnalyze}
           disabled={!file || loading}
-          className={`w-full py-3 px-4 rounded-lg text-white font-bold transition-colors
-            ${!file || loading 
-              ? 'bg-gray-400 cursor-not-allowed' 
-              : 'bg-blue-600 hover:bg-blue-700 shadow-md'}`}
+          className={`button primary-button ${loading || !file ? 'disabled' : ''}`}
         >
-          {loading ? 'Анализируем...' : 'Проверить резюме'}
+          {loading ? '🧠 Анализируем...' : '2. Оценить резюме'}
         </button>
 
         {error && (
-          <div className="mt-4 p-4 bg-red-50 text-red-700 rounded-lg border border-red-200">
-            {error}
+          <div className="error-message">
+            ⚠️ Ошибка: {error}
           </div>
         )}
       </div>
 
       {/* Блок отображения результатов */}
-      {result && (
-        <div className="w-full max-w-3xl mt-8 bg-white p-8 rounded-xl shadow-lg border-t-4 border-green-500">
-          <h2 className="text-2xl font-bold mb-4 text-gray-800">Результат анализа</h2>
-          <div className="prose max-w-none text-gray-700 whitespace-pre-wrap">
-            {/* Здесь мы выводим то, что вернул N8N. Обычно это свойство text или output */}
-            {typeof result === 'string' ? result : JSON.stringify(result, null, 2)}
+      {data && (
+        <div className="card result-card">
+          <h2 className="card-title result-title">
+            📊 Результат оценки: {data.full_name}
+          </h2>
+          <div className="result-content">
+            
+            {/* 1. Общая оценка и вердикт */}
+            <div className="score-display">
+                <div>
+                    <div className="score-label">Общий балл:</div>
+                    <div className="score-value">{data.total_score}</div>
+                </div>
+                <div className={`verdict-status status-${data.grade_verdict.toLowerCase().replace(/\s/g, '-')}`}>
+                    {data.grade_verdict}
+                </div>
+            </div>
+
+            {/* 2. Статус роутинга (Следующий шаг) */}
+            {data.routing_status && (
+                <div className="result-section routing-section">
+                    <h3 className="section-title">Следующий шаг 🛣️</h3>
+                    <p className="routing-text">{data.routing_status}</p>
+                </div>
+            )}
+            
+            {/* 3. Детальная разбивка баллов */}
+            {data.scores_breakdown && (
+                <div className="result-section breakdown-section">
+                    <h3 className="section-title">Разбивка по категориям</h3>
+                    <ul className="breakdown-list">
+                        {Object.entries(data.scores_breakdown).map(([key, value]) => (
+                            <li key={key} className="breakdown-item">
+                                <span className="breakdown-key">{key.replace(/_/g, ' ')}</span>
+                                <span className="breakdown-value">{value}%</span>
+                                <div className="breakdown-bar-container">
+                                    <div 
+                                      className="breakdown-bar" 
+                                      style={{ width: `${value}%`, backgroundColor: value > 70 ? '#10b981' : value > 40 ? '#f59e0b' : '#ef4444' }}
+                                    ></div>
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+            
+            {/* 4. Резюме от AI */}
+            {data.ai_summary && (
+                <div className="result-section summary-section">
+                    <h3 className="section-title">Резюме от AI 🧠</h3>
+                    {/* Используем pre-wrap для сохранения форматирования, если оно есть */}
+                    <p className="section-text">{data.ai_summary}</p>
+                </div>
+            )}
           </div>
         </div>
       )}
