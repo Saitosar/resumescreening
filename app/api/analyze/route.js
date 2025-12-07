@@ -1,10 +1,24 @@
 import { NextResponse } from 'next/server';
 import axios from 'axios';
 
-// ✅ ФИКС 1: Указываем Vercel использовать среду Node.js для поддержки pdf-parse
+// ✅ Обязательно: Указываем Vercel использовать полную среду Node.js
 export const runtime = 'nodejs';
 
 export async function POST(req) {
+  // ✅ Обязательно: Используем require внутри функции, чтобы избежать статического бандлирования
+  let pdf;
+  try {
+    // В большинстве случаев для Next.js/Vercel лучше всего работает простой require 
+    // в сочетании с конфигурацией externalPackages в next.config.js
+    pdf = require('pdf-parse');
+  } catch (e) {
+    console.error('Failed to load pdf-parse via require:', e);
+    return NextResponse.json({ 
+      error: 'PDF parsing library failed to load. Check server logs.', 
+      details: String(e) 
+    }, { status: 500 });
+  }
+
   try {
     const formData = await req.formData();
     const file = formData.get('file');
@@ -17,46 +31,9 @@ export async function POST(req) {
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
 
-    // ✅ ФИКС 2: Динамически загружаем pdf-parse, чтобы обойти проблемы бандлирования
-    let pdf;
-    try {
-      // Используем динамический require для обхода проблем с импортом в Next.js/Vercel
-      // Эта логика была проверена ранее и является наиболее устойчивой
-      const nativeRequire = (typeof __non_webpack_require__ === 'function')
-        ? __non_webpack_require__
-        : (eval('typeof require === "function" ? require : undefined'));
-
-      if (!nativeRequire) {
-        throw new Error('Runtime require is not available');
-      }
-
-      const pdfPkg = nativeRequire('pdf-parse');
-      pdf = pdfPkg && (pdfPkg.default || pdfPkg);
-    } catch (e) {
-      console.error('Failed to load pdf-parse:', e);
-      // Возвращаем ошибку, если библиотека не загрузилась
-      return NextResponse.json({ error: 'Failed to load pdf parsing library', details: String(e) }, { status: 500 });
-    }
-
     // Извлекаем текст
-    let pdfData;
-    try {
-      if (typeof pdf === 'function') {
-        // Поддержка старого API
-        pdfData = await pdf(buffer);
-      } else if (pdf && typeof pdf.PDFParse === 'function') {
-        // Поддержка нового API
-        const parser = new pdf.PDFParse({ data: buffer });
-        const textResult = await parser.getText();
-        pdfData = { text: textResult?.text ?? '' };
-      } else {
-        // Fallback
-        pdfData = await pdf(buffer);
-      }
-    } catch (e) {
-      console.error('Error parsing PDF:', e);
-      return NextResponse.json({ error: 'Failed to parse PDF', details: String(e) }, { status: 500 });
-    }
+    // pdf-parse - это, по сути, функция, которую мы вызываем
+    const pdfData = await pdf(buffer);
     const resumeText = pdfData.text;
 
     console.log('CV text extracted, sending to N8N...');
@@ -72,13 +49,13 @@ export async function POST(req) {
       resume_text: resumeText
     });
 
-    // ✅ ФИКС 3: Корректно проксируем статус успешного ответа от N8N
+    // Корректно проксируем статус успешного ответа от N8N
     return NextResponse.json(response.data, { status: response.status });
 
   } catch (error) {
     console.error('Error processing CV:', error);
     
-    // ✅ ФИКС 4: Проксируем статус ошибки от N8N, если она есть
+    // Проксируем статус ошибки от N8N, если она есть
     if (error.response) {
       return NextResponse.json(error.response.data, { status: error.response.status });
     }
