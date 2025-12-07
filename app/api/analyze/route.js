@@ -1,3 +1,7 @@
+import { NextResponse } from 'next/server';
+import pdf from 'pdf-parse';
+import axios from 'axios';
+
 export async function POST(req) {
   try {
     const formData = await req.formData();
@@ -19,6 +23,11 @@ export async function POST(req) {
 
     // Отправляем в N8N
     const n8nUrl = process.env.N8N_WEBHOOK_URL;
+    
+    if (!n8nUrl) {
+      return NextResponse.json({ error: 'N8N_WEBHOOK_URL not configured' }, { status: 500 });
+    }
+
     const response = await axios.post(n8nUrl, {
       resume_text: resumeText
     });
@@ -28,6 +37,9 @@ export async function POST(req) {
 
   } catch (error) {
     console.error('Error processing CV:', error);
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({ 
+      error: 'Internal Server Error',
+      details: error.message 
+    }, { status: 500 });
   }
 }

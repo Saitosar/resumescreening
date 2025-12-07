@@ -5,11 +5,27 @@ export default function Home() {
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
-  const [debugError, setDebugError] = useState(null); // Для отладки на экране
+  const [debugError, setDebugError] = useState(null);
 
   const handleFileChange = (e) => {
-    if (e.target.files) {
-      setFile(e.target.files[0]);
+    if (e.target.files && e.target.files[0]) {
+      const selectedFile = e.target.files[0];
+      
+      // Валидация типа файла
+      if (selectedFile.type !== 'application/pdf') {
+        setDebugError('Пожалуйста, выберите PDF файл');
+        setFile(null);
+        return;
+      }
+      
+      // Валидация размера (макс 10MB)
+      if (selectedFile.size > 10 * 1024 * 1024) {
+        setDebugError('Файл слишком большой (макс 10MB)');
+        setFile(null);
+        return;
+      }
+      
+      setFile(selectedFile);
       setResult(null);
       setDebugError(null);
     }
@@ -30,30 +46,43 @@ export default function Home() {
         body: formData,
       });
 
-      if (!res.ok) throw new Error(`Server Error: ${res.status}`);
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || `Server Error: ${res.status}`);
+      }
 
       const data = await res.json();
       console.log('Raw Data from N8N:', data);
 
-      // === НОВАЯ ЛОГИКА ОБРАБОТКИ ===
+      // Обработка ответа от N8N
       let finalData = null;
 
-      // 1. Если это массив (как у нас сейчас) -> берем первый элемент
+      // 1. Если это массив -> берем первый элемент
       if (Array.isArray(data)) {
+        if (data.length === 0) {
+          throw new Error('Пустой ответ от сервера');
+        }
         finalData = data[0];
       } 
-      // 2. Если это объект, но внутри есть свойство "result" или "data"
+      // 2. Если это объект с вложенным result
       else if (data.result) {
         finalData = data.result;
       }
-      // 3. Если это чистый объект
-      else {
+      // 3. Если это прямой объект
+      else if (data && typeof data === 'object') {
         finalData = data;
       }
+      else {
+        throw new Error('Некорректный формат ответа от сервера');
+      }
 
-      // Проверка на корректность данных
-      if (!finalData || typeof finalData.total_score === 'undefined') {
-        throw new Error('Некорректный формат ответа от AI');
+      // Валидация структуры данных
+      if (!finalData || typeof finalData !== 'object') {
+        throw new Error('Ответ не содержит данных');
+      }
+
+      if (typeof finalData.total_score === 'undefined') {
+        throw new Error('Отсутствует поле total_score в ответе');
       }
 
       setResult(finalData);
@@ -68,33 +97,61 @@ export default function Home() {
 
   return (
     <div style={{ padding: '40px', maxWidth: '800px', margin: '0 auto', fontFamily: 'sans-serif' }}>
-      <h1 style={{ textAlign: 'center', marginBottom: '30px' }}>🤖 AI CV Screening</h1>
+      <h1 style={{ textAlign: 'center', marginBottom: '30px', color: '#333' }}>
+        🤖 AI CV Screening
+      </h1>
 
       {/* Зона загрузки */}
-      <div style={{ border: '2px dashed #ccc', padding: '30px', textAlign: 'center', borderRadius: '10px', marginBottom: '30px' }}>
-        <input type="file" accept=".pdf" onChange={handleFileChange} style={{ marginBottom: '20px' }} />
+      <div style={{ 
+        border: '2px dashed #ccc', 
+        padding: '30px', 
+        textAlign: 'center', 
+        borderRadius: '10px', 
+        marginBottom: '30px',
+        backgroundColor: '#f9f9f9'
+      }}>
+        <input 
+          type="file" 
+          accept=".pdf" 
+          onChange={handleFileChange}
+          disabled={loading}
+          style={{ marginBottom: '20px' }} 
+        />
+        {file && (
+          <p style={{ color: '#666', fontSize: '14px' }}>
+            Выбран файл: {file.name} ({(file.size / 1024).toFixed(1)} KB)
+          </p>
+        )}
         <br />
         <button 
           onClick={handleUpload} 
           disabled={!file || loading}
           style={{
-            padding: '10px 20px', 
+            padding: '12px 24px', 
             fontSize: '16px', 
-            backgroundColor: loading ? '#ccc' : '#0070f3', 
+            backgroundColor: loading ? '#ccc' : (file ? '#0070f3' : '#ccc'), 
             color: 'white', 
             border: 'none', 
             borderRadius: '5px',
-            cursor: loading ? 'not-allowed' : 'pointer'
+            cursor: loading || !file ? 'not-allowed' : 'pointer',
+            transition: 'background-color 0.3s'
           }}
         >
-          {loading ? 'Анализирую...' : 'Проверить резюме'}
+          {loading ? '⏳ Анализирую...' : '🚀 Проверить резюме'}
         </button>
       </div>
 
-      {/* ОТОБРАЖЕНИЕ ОШИБОК НА ЭКРАНЕ (ЕСЛИ ЕСТЬ) */}
+      {/* ОТОБРАЖЕНИЕ ОШИБОК */}
       {debugError && (
-        <div style={{ color: 'red', padding: '20px', background: '#ffe6e6', borderRadius: '8px', marginBottom: '20px' }}>
-          <strong>Ошибка:</strong> {debugError}
+        <div style={{ 
+          color: '#d32f2f', 
+          padding: '20px', 
+          background: '#ffebee', 
+          borderRadius: '8px', 
+          marginBottom: '20px',
+          border: '1px solid #ef5350'
+        }}>
+          <strong>❌ Ошибка:</strong> {debugError}
         </div>
       )}
 
@@ -102,41 +159,113 @@ export default function Home() {
       {result && (
         <div>
           <div style={{ 
-            backgroundColor: result.total_score > 70 ? '#e6fffa' : '#fff5f5', 
-            padding: '20px', 
+            backgroundColor: result.total_score >= 70 ? '#e8f5e9' : result.total_score >= 50 ? '#fff8e1' : '#ffebee', 
+            padding: '25px', 
             borderRadius: '10px', 
-            border: `1px solid ${result.total_score > 70 ? '#38b2ac' : '#fc8181'}`,
-            marginBottom: '20px'
+            border: `2px solid ${result.total_score >= 70 ? '#4caf50' : result.total_score >= 50 ? '#ff9800' : '#f44336'}`,
+            marginBottom: '20px',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
           }}>
-            <h2 style={{ marginTop: 0 }}>Вердикт: {result.grade_verdict}</h2>
-            <p><strong>Статус:</strong> {result.routing_status}</p>
-            <h1 style={{ fontSize: '48px', margin: '10px 0' }}>{result.total_score}/100</h1>
+            <h2 style={{ marginTop: 0, color: '#333' }}>
+              {result.grade_verdict || 'Результат'}
+            </h2>
+            <p style={{ fontSize: '16px', color: '#666' }}>
+              <strong>Статус:</strong> {result.routing_status || 'N/A'}
+            </p>
+            <h1 style={{ 
+              fontSize: '56px', 
+              margin: '10px 0',
+              color: result.total_score >= 70 ? '#4caf50' : result.total_score >= 50 ? '#ff9800' : '#f44336'
+            }}>
+              {result.total_score}/100
+            </h1>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '20px' }}>
-            <div style={{ background: '#f7fafc', padding: '15px', borderRadius: '8px' }}>
-              <strong>Experience:</strong> {result.scores_breakdown?.experience}%
+          {/* Детали оценки */}
+          {result.scores_breakdown && (
+            <div style={{ 
+              display: 'grid', 
+              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', 
+              gap: '15px', 
+              marginBottom: '20px' 
+            }}>
+              <div style={{ 
+                background: '#f5f5f5', 
+                padding: '15px', 
+                borderRadius: '8px',
+                border: '1px solid #e0e0e0'
+              }}>
+                <strong>📊 Experience:</strong> 
+                <div style={{ fontSize: '24px', color: '#1976d2', marginTop: '5px' }}>
+                  {result.scores_breakdown.experience || 0}%
+                </div>
+              </div>
+              <div style={{ 
+                background: '#f5f5f5', 
+                padding: '15px', 
+                borderRadius: '8px',
+                border: '1px solid #e0e0e0'
+              }}>
+                <strong>💪 Hard Skills:</strong>
+                <div style={{ fontSize: '24px', color: '#1976d2', marginTop: '5px' }}>
+                  {result.scores_breakdown.hard_skills || 0}%
+                </div>
+              </div>
+              <div style={{ 
+                background: '#f5f5f5', 
+                padding: '15px', 
+                borderRadius: '8px',
+                border: '1px solid #e0e0e0'
+              }}>
+                <strong>🛠️ Tools:</strong>
+                <div style={{ fontSize: '24px', color: '#1976d2', marginTop: '5px' }}>
+                  {result.scores_breakdown.tools || 0}%
+                </div>
+              </div>
+              <div style={{ 
+                background: '#f5f5f5', 
+                padding: '15px', 
+                borderRadius: '8px',
+                border: '1px solid #e0e0e0'
+              }}>
+                <strong>🎯 Domain:</strong>
+                <div style={{ fontSize: '24px', color: '#1976d2', marginTop: '5px' }}>
+                  {result.scores_breakdown.domain || 0}%
+                </div>
+              </div>
             </div>
-            <div style={{ background: '#f7fafc', padding: '15px', borderRadius: '8px' }}>
-              <strong>Hard Skills:</strong> {result.scores_breakdown?.hard_skills}%
-            </div>
-            <div style={{ background: '#f7fafc', padding: '15px', borderRadius: '8px' }}>
-              <strong>Tools:</strong> {result.scores_breakdown?.tools}%
-            </div>
-            <div style={{ background: '#f7fafc', padding: '15px', borderRadius: '8px' }}>
-              <strong>Domain:</strong> {result.scores_breakdown?.domain}%
-            </div>
-          </div>
+          )}
 
-          <div style={{ background: '#ebf8ff', padding: '20px', borderRadius: '10px', borderLeft: '5px solid #4299e1' }}>
-            <h3>Совет AI:</h3>
-            <p>{result.ai_summary}</p>
-          </div>
+          {/* Совет AI */}
+          {result.ai_summary && (
+            <div style={{ 
+              background: '#e3f2fd', 
+              padding: '20px', 
+              borderRadius: '10px', 
+              borderLeft: '5px solid #2196f3',
+              marginBottom: '20px'
+            }}>
+              <h3 style={{ marginTop: 0, color: '#1976d2' }}>💡 Совет AI:</h3>
+              <p style={{ margin: 0, lineHeight: '1.6', color: '#333' }}>
+                {result.ai_summary}
+              </p>
+            </div>
+          )}
           
-          {/* ТЕХНИЧЕСКАЯ ИНФО (ЧТОБЫ ТЫ ВИДЕЛ ЧТО ПРИШЛО) */}
+          {/* Техническая информация */}
           <details style={{ marginTop: '20px', color: '#666' }}>
-            <summary>Техническая информация (JSON)</summary>
-            <pre style={{ background: '#eee', padding: '10px', borderRadius: '5px', overflowX: 'auto' }}>
+            <summary style={{ cursor: 'pointer', padding: '10px', backgroundColor: '#f5f5f5', borderRadius: '5px' }}>
+              🔍 Техническая информация (JSON)
+            </summary>
+            <pre style={{ 
+              background: '#263238', 
+              color: '#aed581',
+              padding: '15px', 
+              borderRadius: '5px', 
+              overflowX: 'auto',
+              fontSize: '12px',
+              marginTop: '10px'
+            }}>
               {JSON.stringify(result, null, 2)}
             </pre>
           </details>
