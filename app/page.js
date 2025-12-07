@@ -1,6 +1,14 @@
 'use client';
 import { useState } from 'react';
 
+const formatFileSize = (bytes) => {
+  if (bytes === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+};
+
 export default function Home() {
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -92,19 +100,10 @@ export default function Home() {
         body: formData,
       });
 
+      // ✅ ИСПРАВЛЕНО: Убрана дублирующаяся проверка
       if (!res.ok) {
-        // Try to extract JSON error if possible, otherwise use text
-        let errMsg = `Server Error: ${res.status}`;
-        try {
-          const errorData = await res.json();
-          if (errorData) errMsg = errorData.error || errorData.message || JSON.stringify(errorData);
-        } catch (e) {
-          try {
-            const txt = await res.text();
-            if (txt) errMsg = txt;
-          } catch (e2) {}
-        }
-        throw new Error(errMsg);
+        const errorData = await res.json();
+        throw new Error(errorData.error || `Server Error: ${res.status}`);
       }
 
       const data = await res.json();
@@ -169,7 +168,7 @@ export default function Home() {
         />
         {file && (
           <p style={{ color: '#666', fontSize: '14px' }}>
-            Выбран файл: {file.name} ({(file.size / 1024).toFixed(1)} KB)
+            Выбран файл: {file.name} ({formatFileSize(file.size)})
           </p>
         )}
         <br />

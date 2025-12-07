@@ -79,10 +79,17 @@ export async function POST(req) {
     });
 
     // Возвращаем ответ фронтенду
-    return NextResponse.json(response.data);
+   return NextResponse.json(response.data, { status: response.status });
 
   } catch (error) {
     console.error('Error processing CV:', error);
+    if (error.response) {
+      // Если это ошибка HTTP (4xx или 5xx) от N8N, 
+      // проксируем его статус и тело ошибки клиенту.
+      return NextResponse.json(error.response.data, { status: error.response.status });
+    }
+
+    // Если это внутренняя ошибка сервера (pdf-parse, сеть, таймаут и т.п.)
     return NextResponse.json({ 
       error: 'Internal Server Error',
       details: error.message 
