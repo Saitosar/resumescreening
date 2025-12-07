@@ -1,4 +1,3 @@
-pip list
 export async function POST(req) {
   try {
     const formData = await req.formData();
