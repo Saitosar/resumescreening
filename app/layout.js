@@ -1,3 +1,4 @@
+import './globals.css';
 export const metadata = {
   title: 'AI CV Screening',
   description: 'Resume screening powered by AI',
