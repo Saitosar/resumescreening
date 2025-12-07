@@ -1,7 +1,4 @@
-import { NextResponse } from 'next/server';
-import pdf from 'pdf-parse';
-import axios from 'axios';
-
+pip list
 export async function POST(req) {
   try {
     const formData = await req.formData();
