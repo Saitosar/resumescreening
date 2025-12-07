@@ -11,8 +11,10 @@ export default function Home() {
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0];
       
-      // Валидация типа файла
-      if (selectedFile.type !== 'application/pdf') {
+      // Валидация типа файла (добавлен запасной вариант по расширению)
+      const isPdfByType = selectedFile.type === 'application/pdf';
+      const isPdfByName = typeof selectedFile.name === 'string' && selectedFile.name.toLowerCase().endsWith('.pdf');
+      if (!isPdfByType && !isPdfByName) {
         setDebugError('Пожалуйста, выберите PDF файл');
         setFile(null);
         return;
@@ -31,6 +33,50 @@ export default function Home() {
     }
   };
 
+  // Попытка корректно извлечь полезную полезную нагрузку из ответа сервера
+  const parseServerResponse = (data) => {
+    if (!data && data !== 0) return null;
+
+    // Если пришёл массив — поищем подходящий объект внутри
+    if (Array.isArray(data)) {
+      if (data.length === 0) {
+        throw new Error('Пустой ответ от сервера');
+      }
+
+      // Ищем первый элемент, содержащий полезную информацию
+      for (const item of data) {
+        if (!item || typeof item !== 'object') continue;
+        if (item.json && typeof item.json === 'object') {
+          return item.json;
+        }
+        if (item.result && typeof item.result === 'object') {
+          return item.result;
+        }
+        if (item.body && typeof item.body === 'object') {
+          return item.body;
+        }
+        // Если сам элемент выглядит как финальный объект
+        if (typeof item.total_score !== 'undefined') {
+          return item;
+        }
+      }
+
+      // fallback — возьмём первый элемент и попытаемся извлечь полезные поля
+      const first = data[0];
+      return (first && (first.json || first.result || first.body)) || first;
+    }
+
+    // Если это объект с вложенным result/json/body
+    if (data.result) return data.result;
+    if (data.json) return data.json;
+    if (data.body) return data.body;
+
+    // Если это уже прямой объект с полем total_score — используем его
+    if (typeof data === 'object') return data;
+
+    return null;
+  };
+
   const handleUpload = async () => {
     if (!file) return;
     setLoading(true);
@@ -47,34 +93,38 @@ export default function Home() {
       });
 
       if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || `Server Error: ${res.status}`);
+        // Try to extract JSON error if possible, otherwise use text
+        let errMsg = `Server Error: ${res.status}`;
+        try {
+          const errorData = await res.json();
+          if (errorData) errMsg = errorData.error || errorData.message || JSON.stringify(errorData);
+        } catch (e) {
+          try {
+            const txt = await res.text();
+            if (txt) errMsg = txt;
+          } catch (e2) {}
+        }
+        throw new Error(errMsg);
       }
 
       const data = await res.json();
       console.log('Raw Data from N8N:', data);
 
-      // Обработка ответа от N8N
-      let finalData = null;
+      // Обработка ответа от N8N — используем универсальный парсер
+      let finalData = parseServerResponse(data);
 
-      // 1. Если это массив -> берем первый элемент
-      if (Array.isArray(data)) {
-        if (data.length === 0) {
-          throw new Error('Пустой ответ от сервера');
-        }
-        finalData = data[0];
-      } 
-      // 2. Если это объект с вложенным result
-      else if (data.result) {
-        finalData = data.result;
-      }
-      // 3. Если это прямой объект
-      else if (data && typeof data === 'object') {
-        finalData = data;
-      }
-      else {
+      if (!finalData) {
         throw new Error('Некорректный формат ответа от сервера');
       }
+
+      // Если total_score пришёл как строка — попытаемся привести к числу
+      if (typeof finalData.total_score === 'string') {
+        const parsed = parseFloat(finalData.total_score);
+        finalData.total_score = Number.isFinite(parsed) ? parsed : finalData.total_score;
+      }
+
+      // Ensure scores_breakdown is at least an object to avoid render errors
+      finalData.scores_breakdown = finalData.scores_breakdown || {};
 
       // Валидация структуры данных
       if (!finalData || typeof finalData !== 'object') {
